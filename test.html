@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Four-Color Voronoi Map · Wandering Fifth Color</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Fira Code','Cascadia Code','Courier New',monospace;font-size:12px;display:flex;flex-direction:column}
+.header{display:flex;align-items:center;gap:16px;padding:9px 16px;border-bottom:1px solid #21262d;flex-shrink:0;background:#161b22}
+.header-title{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#7d8590}
+.header-title em{color:#f0b429;font-style:normal}
+.header-sub{font-size:10px;color:#30363d;letter-spacing:1px}
+.main{flex:1;display:flex;overflow:hidden;min-height:0}
+.canvas-wrap{flex:1;position:relative;min-width:0}
+#map-canvas{display:block;width:100%;height:100%}
+.panel{width:236px;flex-shrink:0;display:flex;flex-direction:column;border-left:1px solid #21262d;background:#161b22;overflow:hidden}
+.ps{padding:11px 13px;border-bottom:1px solid #21262d;flex-shrink:0}
+.ps-lbl{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:#484f58;margin-bottom:9px}
+.btn-row{display:flex;gap:4px;flex-wrap:wrap}
+button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:5px 8px;font-family:inherit;font-size:11px;cursor:pointer;border-radius:4px;transition:background .1s,border-color .1s;letter-spacing:.3px}
+button:hover:not(:disabled){background:#2d333b;border-color:#6e7681}
+button.primary{background:#1a2a3a;border-color:#388bfd;color:#79c0ff}
+button.primary:hover:not(:disabled){background:#243246}
+button:disabled{opacity:.3;cursor:default}
+select{width:100%;margin-top:7px;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:5px 7px;font-family:inherit;font-size:11px;border-radius:4px;cursor:pointer}
+.speed-row{display:flex;align-items:center;gap:7px;margin-top:8px;color:#484f58;font-size:11px}
+input[type=range]{flex:1;accent-color:#388bfd;height:4px}
+.stat{display:flex;justify-content:space-between;padding:2px 0;color:#484f58}
+.stat b{color:#c9d1d9;font-weight:normal}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:5px 6px}
+.leg{display:flex;align-items:center;gap:5px;color:#484f58}
+.sw{width:14px;height:9px;border-radius:2px;flex-shrink:0}
+.log-hdr{padding:9px 13px 5px;flex-shrink:0}
+.log-scroll{flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+.le{padding:3px 13px;font-size:10px;color:#484f58;border-left:2px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.le.imp{color:#f85149;border-left-color:#f85149}
+.le.wan{color:#a5a0e8;border-left-color:#7a73d0}
+.le.rst{color:#f0b429;border-left-color:#f0b429}
+.le.done{color:#3fb950;border-left-color:#3fb950}
+.status{padding:5px 13px;font-size:10px;color:#484f58;border-top:1px solid #21262d;flex-shrink:0;background:#161b22;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:24px}
+</style>
+</head>
+<body>
+<div class="header">
+  <span class="header-title">Wandering <em>Fifth Color</em> · Voronoi Map</span>
+  <span class="header-sub">Archuleta &amp; Shapiro, ACM 1986 · Rose Petal / Saturation = 2</span>
+</div>
+<div class="main">
+  <div class="canvas-wrap"><canvas id="map-canvas"></canvas></div>
+  <div class="panel">
+    <div class="ps">
+      <div class="ps-lbl">Controls</div>
+      <div class="btn-row">
+        <button id="btnNew" class="primary">New map</button>
+        <button id="btnPlay">▶ Play</button>
+        <button id="btnStep">Step</button>
+        <button id="btnReset">Reset</button>
+      </div>
+      <select id="sizeSelect" style="display:none"></select>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:7px">
+        <input type="number" id="sizeInput" min="4" max="500" value="30"
+          style="flex:1;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:5px 7px;font-family:inherit;font-size:11px;border-radius:4px">
+        <span style="font-size:10px;color:#484f58">regions</span>
+      </div>
+      <div class="speed-row">
+        <span>Speed</span>
+        <input type="range" id="speedSlider" min="1" max="10" value="4">
+        <span id="speedLabel">4</span>
+      </div>
+    </div>
+    <div class="ps">
+      <div class="ps-lbl">Statistics</div>
+      <div class="stat">Regions   <b id="sN">—</b></div>
+      <div class="stat">Borders   <b id="sE">—</b></div>
+      <div class="stat">Colored   <b id="sC">—</b></div>
+      <div class="stat">Impasses  <b id="sI">0</b></div>
+      <div class="stat">Restarts  <b id="sR">0</b></div>
+      <div class="stat">BFS center<b id="sO">—</b></div>
+    </div>
+    <div class="ps">
+      <div class="ps-lbl">Legend</div>
+      <div class="legend">
+        <div class="leg"><div class="sw" style="background:#8b2535"></div>Color 1</div>
+        <div class="leg"><div class="sw" style="background:#1a5ea8"></div>Color 2</div>
+        <div class="leg"><div class="sw" style="background:#1e7a45"></div>Color 3</div>
+        <div class="leg"><div class="sw" style="background:#9a6b10"></div>Color 4</div>
+        <div class="leg"><div class="sw" style="background:#1a2030;border:1px solid #30363d"></div>Uncolored</div>
+        <div class="leg"><div class="sw" style="background:#f85149"></div>Impasse</div>
+        <div class="leg"><div class="sw" style="background:#7a73d0"></div>Wander path</div>
+        <div class="leg"><div class="sw" style="background:#232d40;border:1px solid #c9d1d9"></div>Active</div>
+      </div>
+    </div>
+    <div class="log-hdr"><div class="ps-lbl" style="margin:0">Event log</div></div>
+    <div class="log-scroll" id="logScroll"></div>
+    <div class="status" id="statusBar">Loading d3-delaunay…</div>
+  </div>
+</div>
+
+<script type="module">
+import { Delaunay } from 'https://esm.sh/d3-delaunay@6';
+
+// ── PRNG ─────────────────────────────────────────────────────────────
+function mkRng(seed) {
+  let s = (seed ^ 0x9e3779b9) >>> 0;
+  return () => { s = Math.imul(1664525, s) + 1013904223 >>> 0; return s / 0x100000000; };
+}
+
+// ── BFS ──────────────────────────────────────────────────────────────
+function bfsBuild(adj, center) {
+  const n = adj.length;
+  const layer = new Int32Array(n).fill(-1);
+  const order = [], q = [center];
+  layer[center] = 0;
+  let qi = 0;
+  while (qi < q.length) {
+    const v = q[qi++]; order.push(v);
+    for (const u of adj[v]) if (layer[u] < 0) { layer[u] = layer[v] + 1; q.push(u); }
+  }
+  for (let v = 0; v < n; v++) if (layer[v] < 0) { layer[v] = 9999; order.push(v); }
+  return { order, layer };
+}
+
+// ── COLORING ALGORITHM (generator) ───────────────────────────────────
+function* coloringAlg(adj, maxRestarts = 200) {
+  const n = adj.length;
+  const rng = mkRng(42);
+
+  for (let attempt = 0; attempt <= maxRestarts; attempt++) {
+    const center = attempt < n ? attempt : Math.floor(rng() * n);
+    const { order } = bfsBuild(adj, center);
+    const bfsPos = new Int32Array(n);
+    order.forEach((v, i) => { bfsPos[v] = i; });
+
+    yield { type: 'new_attempt', attempt, center };
+
+    const color = new Int32Array(n);
+    const sat   = new Int32Array(n);
+    const uncolored = new Set(Array.from({ length: n }, (_, i) => i));
+
+    const nbrC  = v => { const s = new Set(); for (const u of adj[v]) if (color[u]) s.add(color[u]); return s; };
+    const free  = v => { const u = nbrC(v); for (const c of [1,2,3,4]) if (!u.has(c)) return c; return 0; };
+    const updSat= v => { for (const u of adj[v]) if (uncolored.has(u)) sat[u] = nbrC(u).size; };
+    const nextV = () => {
+      let bH=-1, bHp=Infinity, bL=-1, bLp=Infinity;
+      for (const v of uncolored) {
+        // Always compute fresh — sat[] can be stale after wander path changes colors
+        const s = nbrC(v).size;
+        // sat >= 2: eligible for early processing, ordered by BFS position within the eligible set
+        if (s >= 2) { if (bfsPos[v] < bHp) { bH=v; bHp=bfsPos[v]; } }
+        // sat < 2: follow static BFS order
+        else        { if (bfsPos[v] < bLp) { bL=v; bLp=bfsPos[v]; } }
+      }
+      return bH >= 0 ? bH : bL;
+    };
+
+    function* wand(start) {
+      const path = new Set();
+      const snap = () => new Int32Array(color);
+      function* rec(v) {
+        path.add(v);
+        yield { type:'wander_enter', v, path:[...path], snap:snap() };
+        const cnt = new Map();
+        for (const u of adj[v]) if (color[u]) cnt.set(color[u], (cnt.get(color[u])||0)+1);
+        const cands = [];
+        for (const u of adj[v]) if (color[u] && cnt.get(color[u])===1) cands.push(u);
+
+        for (const u of cands) {
+          if (path.has(u)) continue;
+          const cu = color[u];
+          color[v]=cu; uncolored.delete(v); color[u]=0; uncolored.add(u);
+          yield { type:'wander_try', v, u, cu, path:[...path], snap:snap() };
+
+          // Try direct recolor of u first
+          const nc = free(u);
+          if (nc) {
+            color[u]=nc; uncolored.delete(u); updSat(u); updSat(v);
+            yield { type:'wander_success', v, u, cv:cu, cu:nc, path:[...path], snap:snap() };
+            path.delete(v); return true;
+          }
+
+          // Direct failed — immediately recurse on u before trying next candidate
+          yield { type:'wander_recurse', v, u, path:[...path], snap:snap() };
+          const ok = yield* rec(u);
+          if (ok) { path.delete(v); return true; }
+
+          // Both failed — undo and try next candidate
+          color[v]=0; uncolored.add(v); color[u]=cu; uncolored.delete(u);
+          yield { type:'wander_undo', v, u, path:[...path], snap:snap() };
+        }
+        yield { type:'wander_back', v, path:[...path], snap:snap() };
+        path.delete(v); return false;
+      }
+      return yield* rec(start);
+    }
+
+    let failed = false;
+    while (uncolored.size > 0) {
+      const v = nextV();
+      const freshSat = nbrC(v).size;
+      yield { type:'select', v, sat:freshSat };
+      const c = free(v);
+      if (c) {
+        color[v]=c; uncolored.delete(v); updSat(v);
+        yield { type:'color', v, c, total:n-uncolored.size };
+      } else {
+        yield { type:'impasse', v };
+        const wi = wand(v);
+        let resolved = false;
+        for (;;) {
+          const s = wi.next();
+          if (s.done) { resolved = !!s.value; break; }
+          yield s.value;
+          if (s.value.type==='wander_success') { resolved=true; wi.return&&wi.return(); break; }
+        }
+        if (!resolved) { yield { type:'restart', attempt }; failed=true; break; }
+      }
+    }
+    if (!failed) { yield { type:'done', color:new Int32Array(color), attempt }; return; }
+  }
+  yield { type:'failed' };
+}
+
+// ── VORONOI MAP GENERATION ────────────────────────────────────────────
+function genMap(n, W, H, seed) {
+  const rng  = mkRng(seed);
+  const pad  = 14;
+  const bounds = [pad, pad, W-pad, H-pad];
+
+  // Random seed points
+  let pts = Array.from({length:n}, () => [pad+rng()*(W-2*pad), pad+rng()*(H-2*pad)]);
+
+  // Lloyd relaxation → uniform cells
+  for (let iter = 0; iter < 6; iter++) {
+    const del = Delaunay.from(pts);
+    const vor = del.voronoi(bounds);
+    pts = pts.map((p, i) => {
+      const poly = vor.cellPolygon(i);
+      if (!poly || poly.length < 3) return p;
+      let cx=0, cy=0, k=0;
+      for (const [x,y] of poly) { cx+=x; cy+=y; k++; }
+      return [cx/k, cy/k];
+    });
+  }
+
+  const delaunay = Delaunay.from(pts);
+  const voronoi  = delaunay.voronoi(bounds);
+
+  // Polygons + centroids
+  const polys     = Array.from({length:n}, (_,i) => voronoi.cellPolygon(i));
+  const centroids = polys.map(poly => {
+    if (!poly || poly.length < 3) return null;
+    let cx=0, cy=0, k=0;
+    for (const [x,y] of poly) { cx+=x; cy+=y; k++; }
+    return [cx/k, cy/k];
+  });
+
+  // Adjacency from shared Voronoi edges only.
+  // delaunay.neighbors() includes Delaunay triangulation neighbors that may not
+  // share a visible border (zero-length clipped edges). Instead, build adjacency
+  // by finding polygon pairs that share an actual edge (two consecutive vertices).
+  // Coordinates are rounded to 3 decimal places to handle floating-point jitter.
+  const adj = Array.from({length:n}, () => new Set());
+  const edgeMap = new Map();
+  const edgeKey = (a, b) => {
+    const ax = Math.round(a[0]*1000), ay = Math.round(a[1]*1000);
+    const bx = Math.round(b[0]*1000), by = Math.round(b[1]*1000);
+    return ax < bx || (ax === bx && ay < by)
+      ? `${ax},${ay}:${bx},${by}`
+      : `${bx},${by}:${ax},${ay}`;
+  };
+  for (let i = 0; i < n; i++) {
+    const poly = polys[i];
+    if (!poly || poly.length < 3) continue;
+    const len = poly.length - 1;  // closed polygon: last point === first
+    for (let j = 0; j < len; j++) {
+      const k = edgeKey(poly[j], poly[(j+1) % len]);
+      if (edgeMap.has(k)) {
+        const other = edgeMap.get(k);
+        adj[i].add(other); adj[other].add(i);
+      } else {
+        edgeMap.set(k, i);
+      }
+    }
+  }
+
+  const edges = adj.reduce((s,nb) => s+nb.size, 0) / 2;
+  return { adj, polys, centroids, edges };
+}
+
+// ── RENDERER ──────────────────────────────────────────────────────────
+// Clearly distinct fills: uncolored stays dark, colors are vivid enough to see
+const FILLS = ['#1a2030','#8b2535','#1a5ea8','#1e7a45','#9a6b10'];
+
+class MapRenderer {
+  constructor(cv) {
+    this.cv=cv; this.ctx=cv.getContext('2d');
+    this.polys=null; this.centroids=null; this.adj=null; this.n=0;
+  }
+  setup(polys, centroids, adj) {
+    this.polys=polys; this.centroids=centroids; this.adj=adj; this.n=polys.length;
+  }
+
+  _trace(i) {
+    const poly = this.polys[i];
+    if (!poly || poly.length < 3) return false;
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.moveTo(poly[0][0], poly[0][1]);
+    for (let j=1; j<poly.length; j++) ctx.lineTo(poly[j][0], poly[j][1]);
+    ctx.closePath();
+    return true;
+  }
+
+  draw(st) {
+    const {cv,ctx,polys,centroids,n} = this;
+    if (!polys) return;
+    const pulse = 0.5 + 0.5*Math.sin(Date.now()/160);
+
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,cv.width,cv.height);
+
+    // ── Pass 1: fill all regions with their true color only ───────
+    for (let i=0; i<n; i++) {
+      if (!this._trace(i)) continue;
+      const col = st.color ? st.color[i] : 0;
+      ctx.fillStyle = col ? FILLS[col] : '#1a2030';
+      ctx.fill();
+      ctx.strokeStyle='#090d12'; ctx.lineWidth=1.5; ctx.stroke();
+    }
+
+    // ── Pass 2: colored-neighbor glow for selected vertex ─────────
+    if (st.cur >= 0 && this.adj && st.color) {
+      for (const nb of this.adj[st.cur]) {
+        if (!st.color[nb]) continue;
+        if (!this._trace(nb)) continue;
+        ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=2; ctx.stroke();
+      }
+    }
+
+    // ── Pass 3: borders only for special states ───────────────────
+    for (let i=0; i<n; i++) {
+      const isImp = i===st.imp;
+      const isCur = i===st.cur;
+      const isW   = st.wSet && st.wSet.has(i);
+      if (!isImp && !isCur && !isW) continue;
+      if (!this._trace(i)) continue;
+      if (isImp) {
+        ctx.strokeStyle=`rgba(248,81,73,${0.6+0.4*pulse})`; ctx.lineWidth=3.5;
+      } else if (isCur) {
+        ctx.strokeStyle='rgba(240,246,252,0.9)'; ctx.lineWidth=2.5;
+      } else {
+        // wander path: purple border, thickness scales with pulse for visibility
+        ctx.strokeStyle=`rgba(160,150,225,${0.6+0.3*pulse})`; ctx.lineWidth=2.5;
+      }
+      ctx.stroke();
+    }
+
+    // ── BFS center dot ────────────────────────────────────────────
+    if (st.center>=0 && centroids[st.center]) {
+      const [cx,cy] = centroids[st.center];
+      ctx.setLineDash([3,3]); ctx.strokeStyle='rgba(140,130,220,0.6)'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(cx,cy,7,0,Math.PI*2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle='rgba(140,130,220,0.8)';
+      ctx.beginPath(); ctx.arc(cx,cy,2.5,0,Math.PI*2); ctx.fill();
+    }
+
+    // ── Sat numbers for high-sat uncolored regions ────────────────
+    if (st.sat) {
+      ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='9px monospace';
+      for (let i=0; i<n; i++) {
+        if (!centroids[i]||st.color[i]||st.sat[i]<2) continue;
+        const [cx,cy]=centroids[i];
+        ctx.fillStyle='rgba(110,125,140,0.85)';
+        ctx.fillText(st.sat[i],cx,cy);
+      }
+    }
+  }
+}
+
+// ── APP ───────────────────────────────────────────────────────────────
+const canvas = document.getElementById('map-canvas');
+const rend = new MapRenderer(canvas);
+
+let mapData=null, gen=null, playing=false, rafId=null, lastT=0;
+let impCnt=0, rstCnt=0;
+let st = {color:null,sat:null,cur:-1,imp:-1,wSet:null,center:-1};
+
+function resize() {
+  const wrap=document.querySelector('.canvas-wrap');
+  canvas.width=wrap.clientWidth; canvas.height=wrap.clientHeight;
+  if (rend.polys) rend.draw(st);
+  else { const c=canvas.getContext('2d'); c.fillStyle='#0d1117'; c.fillRect(0,0,canvas.width,canvas.height); }
+}
+window.addEventListener('resize', resize);
+
+function newMap() {
+  stop();
+  const n = Math.max(4, Math.min(500, +document.getElementById('sizeInput').value || 30));
+  const seed = (Math.random()*0x7fffffff)|0;
+  status('Generating Voronoi map…');
+  setTimeout(() => {
+    try {
+      const {adj,polys,centroids,edges} = genMap(n, canvas.width, canvas.height, seed);
+      mapData = {adj,polys,centroids};
+      rend.setup(polys,centroids,adj);
+      ['sI','sR'].forEach(id=>document.getElementById(id).textContent='0');
+      document.getElementById('sN').textContent=n;
+      document.getElementById('sE').textContent=edges;
+      document.getElementById('sC').textContent='0';
+      document.getElementById('sO').textContent='—';
+      document.getElementById('logScroll').innerHTML='';
+      st={color:new Int32Array(n),sat:new Int32Array(n),cur:-1,imp:-1,wSet:null,center:-1};
+      impCnt=0; rstCnt=0;
+      gen=coloringAlg(adj);
+      rend.draw(st);
+      status('Map ready — press ▶ Play or Step');
+    } catch(e) { status('Error: '+e.message); console.error(e); }
+  }, 10);
+}
+
+function recomputeSat() {
+  // Full recompute of st.sat from current st.color — needed after any wander
+  // that changes colors along a path, since updSat only patches immediate neighbors
+  const adj = mapData.adj;
+  for (let v = 0; v < adj.length; v++) {
+    if (st.color[v]) { st.sat[v] = 0; continue; }
+    const s = new Set();
+    for (const u of adj[v]) if (st.color[u]) s.add(st.color[u]);
+    st.sat[v] = s.size;
+  }
+}
+
+function proc(ev) {
+  const n=mapData?mapData.adj.length:0;
+  switch(ev.type) {
+    case 'new_attempt':
+      if (ev.attempt>0) { rstCnt++; log(`restart #${ev.attempt} → center=${ev.center}`,'rst'); }
+      st.color=new Int32Array(n); st.sat=new Int32Array(n);
+      st.center=ev.center; st.imp=-1; st.wSet=null;
+      document.getElementById('sO').textContent=ev.center;
+      document.getElementById('sR').textContent=rstCnt;
+      status(`Attempt ${ev.attempt+1}: BFS from region ${ev.center}`); break;
+
+    case 'select':
+      st.cur=ev.v; st.imp=-1; st.wSet=null;
+      status(ev.sat>=2?`Region ${ev.v}: sat-override (sat=${ev.sat})`:`Region ${ev.v}: BFS order (sat=${ev.sat})`); break;
+
+    case 'color':
+      st.color[ev.v]=ev.c; st.cur=-1;
+      for (const u of mapData.adj[ev.v]) {
+        const s=new Set(); for (const w of mapData.adj[u]) if(st.color[w]) s.add(st.color[w]);
+        st.sat[u]=s.size;
+      }
+      document.getElementById('sC').textContent=ev.total;
+      status(`Region ${ev.v} → color ${ev.c}  (${ev.total}/${n})`); break;
+
+    case 'impasse':
+      impCnt++; st.imp=ev.v; st.cur=-1;
+      document.getElementById('sI').textContent=impCnt;
+      log(`impasse at region ${ev.v}`,'imp');
+      status(`IMPASSE at region ${ev.v} — wandering...`); break;
+
+    case 'wander_enter':
+      st.wSet=new Set(ev.path); st.color.set(ev.snap); recomputeSat();
+      status(`Wander: entered region ${ev.v} (depth ${ev.path.length})`); break;
+
+    case 'wander_try':
+      st.wSet=new Set(ev.path); st.color.set(ev.snap); recomputeSat();
+      status(`Wander: try displacing region ${ev.u} (col ${ev.cu}) → ${ev.v}`); break;
+
+    case 'wander_undo':
+      st.wSet=new Set(ev.path); st.color.set(ev.snap); recomputeSat();
+      status(`Wander: undo — restoring region ${ev.u}`); break;
+
+    case 'wander_recurse':
+      st.wSet=new Set(ev.path); st.color.set(ev.snap); recomputeSat();
+      log(`wander ${ev.v}→${ev.u}  depth=${ev.path.length}`,'wan');
+      status(`Wander: recurse to region ${ev.u}`); break;
+
+    case 'wander_back':
+      st.wSet=ev.path.length?new Set(ev.path):null; st.color.set(ev.snap); recomputeSat();
+      status(`Wander: backtrack from region ${ev.v}`); break;
+
+    case 'wander_success':
+      st.imp=-1; st.wSet=null; st.color.set(ev.snap); recomputeSat();
+      log(`wander ✓  region ${ev.v}→col${ev.cv},  region ${ev.u}→col${ev.cu}`,'wan');
+      status('Wander resolved'); break;
+
+    case 'restart':
+      st.imp=-1; st.wSet=null;
+      log('wander failed → full restart','rst');
+      status('Restarting with new BFS center...'); break;
+
+    case 'done':
+      st.color.set(ev.color); st.cur=-1; st.imp=-1; st.wSet=null; stop();
+      document.getElementById('sC').textContent=n;
+      log(`✓ complete — ${ev.attempt} restart(s)`,'done');
+      status(`Done! Valid 4-colouring  (${ev.attempt} restart(s))`);
+      gen=null; break;
+
+    case 'failed':
+      stop(); log('✗ max restarts exceeded','imp'); status('Failed — max restarts exceeded'); gen=null; break;
+  }
+}
+
+function stepOnce() {
+  if (!gen) return false;
+  const {done,value}=gen.next();
+  if (done) { gen=null; return false; }
+  proc(value); rend.draw(st); return true;
+}
+
+function getDelay() {
+  const s=+document.getElementById('speedSlider').value;
+  return Math.round(800/(s*s*0.09+s*0.6+1));
+}
+
+function loop(now) {
+  if (!playing) return;
+  rafId=requestAnimationFrame(loop);
+  if (st.imp>=0) rend.draw(st);                          // keep pulse alive
+  if (now-lastT>=getDelay()) { lastT=now; if(!stepOnce()) stop(); }
+}
+
+function play() {
+  if (!gen||playing) return;
+  playing=true;
+  document.getElementById('btnPlay').textContent='⏸ Pause';
+  lastT=performance.now(); rafId=requestAnimationFrame(loop);
+}
+function stop() {
+  playing=false;
+  document.getElementById('btnPlay').textContent='▶ Play';
+  if (rafId) { cancelAnimationFrame(rafId); rafId=null; }
+}
+function togglePlay() { if (!gen) return; playing?stop():play(); }
+
+function reset() {
+  if (!mapData) return;
+  stop();
+  const n=mapData.adj.length;
+  st={color:new Int32Array(n),sat:new Int32Array(n),cur:-1,imp:-1,wSet:null,center:-1};
+  impCnt=0; rstCnt=0;
+  ['sC','sI','sR'].forEach(id=>document.getElementById(id).textContent='0');
+  document.getElementById('sO').textContent='—';
+  document.getElementById('logScroll').innerHTML='';
+  gen=coloringAlg(mapData.adj); rend.draw(st);
+  status('Reset — press ▶ Play or Step');
+}
+
+function log(msg,cls='') {
+  const el=document.createElement('div');
+  el.className='le'+(cls?' '+cls:''); el.textContent=msg;
+  const sc=document.getElementById('logScroll');
+  sc.appendChild(el); sc.scrollTop=sc.scrollHeight;
+  while (sc.children.length>400) sc.removeChild(sc.firstChild);
+}
+function status(msg) { document.getElementById('statusBar').textContent=msg; }
+
+document.getElementById('btnNew').addEventListener('click', newMap);
+document.getElementById('btnPlay').addEventListener('click', togglePlay);
+document.getElementById('btnStep').addEventListener('click', ()=>{ if(!playing) stepOnce(); });
+document.getElementById('btnReset').addEventListener('click', reset);
+document.getElementById('speedSlider').addEventListener('input', e=>{
+  document.getElementById('speedLabel').textContent=e.target.value;
+});
+
+resize();
+newMap();
+</script>
+</body>
+</html>
